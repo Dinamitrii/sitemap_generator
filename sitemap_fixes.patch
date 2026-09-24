@@ -6,10 +6,10 @@ index ca6e941..5335204 100644
 -web: gunicorn app:app
 +web: gunicorn app:app --workers 2 --threads 4 --timeout 60
 diff --git a/app.py b/app.py
-index e4477c7..eaa0c8f 100644
+index e4477c7..1a49ec4 100644
 --- a/app.py
 +++ b/app.py
-@@ -1,69 +1,333 @@
+@@ -1,69 +1,338 @@
 -import os
  import io
 -import requests
@@ -33,12 +33,17 @@ index e4477c7..eaa0c8f 100644
 -from flask import Flask, render_template, Response, url_for, redirect, session, send_file, abort
 +import requests
 +from bs4 import BeautifulSoup
++from dotenv import load_dotenv
 +from flask import Flask, abort, redirect, render_template, send_file, session, url_for
 +from flask_sqlalchemy import SQLAlchemy
  from flask_wtf import FlaskForm
  from wtforms import StringField, SubmitField
 -from wtforms.validators import DataRequired, URL
 +from wtforms.validators import DataRequired, URL, ValidationError
++
++# Зарежда .env (ако има) преди четене на настройките. Реалните променливи на
++# средата (напр. на хостинга) имат предимство пред .env.
++load_dotenv()
 +
 +DEBUG = os.getenv('FLASK_DEBUG') == '1'
  
@@ -389,7 +394,7 @@ index e4477c7..eaa0c8f 100644
  
  
  # --- Маршрути ---
-@@ -72,33 +336,50 @@ def crawl_site(start_url):
+@@ -72,33 +341,50 @@ def crawl_site(start_url):
  def index():
      form = ScanForm()
      if form.validate_on_submit():
@@ -454,7 +459,7 @@ index e4477c7..eaa0c8f 100644
          for url in sorted(urls):
              url_tag = ET.SubElement(root, "url")
              loc = ET.SubElement(url_tag, "loc")
-@@ -117,7 +398,7 @@ def export_file(filename):
+@@ -117,7 +403,7 @@ def export_file(filename):
          mimetype = 'application/xml'
  
      elif filename == 'robots.txt':
@@ -463,7 +468,7 @@ index e4477c7..eaa0c8f 100644
          file_data = content.encode('utf-8')
          mimetype = 'text/plain'
      else:
-@@ -132,4 +413,5 @@ def export_file(filename):
+@@ -132,4 +418,5 @@ def export_file(filename):
  
  
  if __name__ == '__main__':

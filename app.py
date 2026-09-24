@@ -15,11 +15,16 @@ from xml.dom import minidom
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from flask import Flask, abort, redirect, render_template, send_file, session, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired, URL, ValidationError
+
+# Зарежда .env (ако има) преди четене на настройките. Реалните променливи на
+# средата (напр. на хостинга) имат предимство пред .env.
+load_dotenv()
 
 DEBUG = os.getenv('FLASK_DEBUG') == '1'
 

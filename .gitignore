@@ -3,3 +3,4 @@
 /instance/site.db
 .idea/
 instance/
+.env

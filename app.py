@@ -1,6 +1,7 @@
 import os
+import io
 import secrets
-from flask import Flask, render_template, Response, url_for, redirect, flash
+from flask import Flask, render_template, Response, url_for, redirect, flash, send_file, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_sitemap import Sitemap
 from datetime import datetime
@@ -134,6 +135,41 @@ def robots_txt():
     sitemap_url = url_for('flask_sitemap.sitemap', _external=True)
     content = f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url}"
     return Response(content, mimetype="text/plain")
+
+
+# ... останалият ви код (модели, форми, индекси) ...
+
+@app.route('/export/<string:filename>')
+def export_file(filename):
+    if filename == 'sitemap.xml':
+        # 1. Извличаме текущите данни за sitemap
+        # Използваме скритото системно име, с което flask_sitemap регистрира маршрута си
+        try:
+            # Извикваме системния отговор на разширението за sitemap
+            sitemap_view = app.view_functions['flask_sitemap.sitemap']
+            response = sitemap_view()
+            file_data = response.get_data()
+            mimetype = 'application/xml'
+        except Exception:
+            return abort(500, "Грешка при генериране на sitemap.")
+
+    elif filename == 'robots.txt':
+        # 2. Извличаме съдържанието за robots.txt директно от нашата функция
+        sitemap_url = url_for('flask_sitemap.sitemap', _external=True)
+        content = f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url}"
+        file_data = content.encode('utf-8')
+        mimetype = 'text/plain'
+
+    else:
+        return abort(404)  # Непознат файл
+
+    # Изпращаме файла към потребителя като сваляне (download)
+    return send_file(
+        io.BytesIO(file_data),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename
+    )
 
 
 if __name__ == '__main__':

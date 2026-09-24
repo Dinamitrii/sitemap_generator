@@ -1,3 +1,5 @@
 /.env
 /.venv/
 /instance/site.db
+.idea/
+instance/

@@ -1,169 +1,128 @@
 import os
 import io
-import secrets
-from flask import Flask, render_template, Response, url_for, redirect, flash, send_file, abort
-from flask_sqlalchemy import SQLAlchemy
-from flask_sitemap import Sitemap
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 from datetime import datetime
-from dotenv import load_dotenv
 
-# Разширения за уеб форми
+from flask import Flask, render_template, Response, url_for, redirect, session, send_file, abort
 from flask_wtf import FlaskForm
-from wtforms import StringField, SelectField, FloatField, SubmitField
-from wtforms.validators import DataRequired, Length, NumberRange
-
-
-# Функция за автоматично генериране на SECRET_KEY в .env файла
-def ensure_secret_key_exists():
-    env_path = '.env'
-    # Създаваме файла, ако изобщо не съществува
-    if not os.path.exists(env_path):
-        with open(env_path, 'w') as f:
-            f.write("FLASK_DEBUG=True\nDATABASE_URL=sqlite:///site.db\nSERVER_NAME=\n")
-
-    # Проверяваме дали вътре има SECRET_KEY
-    with open(env_path, 'r') as f:
-        content = f.read()
-
-    if "SECRET_KEY=" not in content:
-        # Генериране на сигурен случаен ключ от операционната система
-        random_key = secrets.token_hex(32)
-        with open(env_path, 'a') as f:
-            f.write(f"\nSECRET_KEY={random_key}\n")
-        print(f" Генериран е нов защитен SECRET_KEY и е записан в {env_path}")
-
-
-# Стартиране на проверката и зареждане на .env
-ensure_secret_key_exists()
-load_dotenv()
+from wtforms import StringField, SubmitField
+from wtforms.validators import DataRequired, URL
 
 app = Flask(__name__)
-
-# Конфигуриране от .env
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///site.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SITEMAP_BLUEPRINT_URL_PREFIX'] = '/'
-app.config['SITEMAP_INCLUDE_RULES_WITHOUT_PARAMS'] = True
-
-if os.getenv('SERVER_NAME'):
-    app.config['SERVER_NAME'] = os.getenv('SERVER_NAME')
-
-db = SQLAlchemy(app)
-ext = Sitemap(app=app)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'super-secret-key-for-crawler')
 
 
-# --- Модел на Базата Данни ---
-class Post(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(100), nullable=False)
-    slug = db.Column(db.String(100), unique=True, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    changefreq = db.Column(db.String(20), default='weekly')
-    priority = db.Column(db.Float, default=0.6)
+# --- Дефиниране на Формата за сканиране ---
+class ScanForm(FlaskForm):
+    domain_url = StringField('Въведете URL адрес на сайт за обхождане', validators=[DataRequired(), URL()])
+    submit = SubmitField('Стартирай сканирането')
 
 
-# --- Дефиниране на Уеб Формата (Flask-WTF) ---
-class PostForm(FlaskForm):
-    title = StringField('Заглавие на статията', validators=[DataRequired(), Length(max=100)])
-    slug = StringField('URL Slug', validators=[DataRequired(), Length(max=100)])
-    changefreq = SelectField('Честота на обновяване (Changefreq)', choices=[
-        ('always', 'Винаги (always)'),
-        ('hourly', 'Ежечасно (hourly)'),
-        ('daily', 'Ежедневно (daily)'),
-        ('weekly', 'Ежеседмично (weekly)'),
-        ('monthly', 'Ежемесечно (monthly)'),
-        ('yearly', 'Ежегодно (yearly)'),
-        ('never', 'Никога (never)')
-    ], default='weekly')
-    priority = FloatField('Приоритет (0.0 - 1.0)', default=0.6, validators=[
-        DataRequired(), NumberRange(min=0.0, max=1.0)
-    ])
-    submit = SubmitField('Публикувай статията')
+# --- Функция за обхождане (Crawler) ---
+def crawl_site(start_url):
+    domain = urlparse(start_url).netloc
+    visited = set()
+    to_visit = {start_url}
+
+    # 1. СТРАТЕГИЧЕСКО ДОБАВЯНЕ: Лъжем сайта, че сме истински Google Chrome браузър
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    max_pages = 100
+
+    while to_visit and len(visited) < max_pages:
+        current_url = to_visit.pop()
+        if current_url not in visited:
+            visited.add(current_url)
+            try:
+                # Подаваме нашите фалшиви браузърни заглавия (headers)
+                response = requests.get(current_url, headers=headers, timeout=5)
+
+                # Ако сайтът пак ни блокира, прескачаме страницата
+                if response.status_code != 200:
+                    continue
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                for a_tag in soup.find_all('a', href=True):
+                    full_url = urljoin(current_url, a_tag['href'])
+                    parsed_url = urlparse(full_url)
+
+                    # Проверка дали линкът принадлежи на същия домейн
+                    if parsed_url.netloc == domain and parsed_url.scheme in ['http', 'https']:
+                        # ПОПРАВКА ТУК: Оставяме адреса като нишка (string), а не списък (list)
+                        clean_url = full_url.split('#')[0]
+
+                        if clean_url not in visited:
+                            to_visit.add(clean_url)
+            except Exception as e:
+                print(f"Грешка при сканиране на {current_url}: {e}")
+                continue
+
+    return list(visited)
 
 
 # --- Маршрути ---
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    form = PostForm()
-
-    # Проверка дали формата е попълнена правилно и изпратена
+    form = ScanForm()
     if form.validate_on_submit():
-        # Създаване на нов запис в базата данни
-        new_post = Post(
-            title=form.title.data,
-            slug=form.slug.data.strip().lower().replace(" ", "-"),  # Опростен формат за slug
-            changefreq=form.changefreq.data,
-            priority=form.priority.data
-        )
-        try:
-            db.session.add(new_post)
-            db.session.commit()
-            return redirect(url_for('index'))
-        except Exception:
-            db.session.rollback()
-            return "Грешка: Възможно е този URL Slug вече да съществува!"
+        target_url = form.domain_url.data.strip('/')
 
-    posts = Post.query.all()
-    return render_template('index.html', posts=posts, form=form)
+        # Обхождаме сайта и взимаме списък с уникални линкове
+        discovered_urls = crawl_site(target_url)
 
+        # Запазваме резултатите временно в потребителската сесия
+        session['scanned_domain'] = target_url
+        session['discovered_urls'] = discovered_urls
+        session['url_count'] = len(discovered_urls)
 
-@app.route('/blog/<string:slug>')
-def view_post(slug):
-    post = Post.query.filter_by(slug=slug).first_or_404()
-    return f"""
-    <div style="font-family: Arial; max-width: 600px; margin: 40px auto; line-height: 1.6;">
-        <a href="{url_for('index')}">&larr; Назад към началото</a>
-        <h1>{post.title}</h1>
-        <hr>
-        <small style="color: #666;">SEO мета данни: Обновяване: {post.changefreq} | Приоритет: {post.priority}</small>
-    </div>
-    """
+        return redirect(url_for('index'))
 
+    return render_template('index.html', form=form)
 
-# --- Sitemap & Robots.txt ---
-@ext.register_generator
-def view_post_generator():
-    posts = Post.query.all()
-    for post in posts:
-        yield ('view_post', {'slug': post.slug}, post.updated_at.strftime('%Y-%m-%d'), post.changefreq, post.priority)
-
-
-@app.route('/robots.txt')
-def robots_txt():
-    sitemap_url = url_for('flask_sitemap.sitemap', _external=True)
-    content = f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url}"
-    return Response(content, mimetype="text/plain")
-
-
-# ... останалият ви код (модели, форми, индекси) ...
 
 @app.route('/export/<string:filename>')
 def export_file(filename):
+    # Ако потребителят се опитва да свали файл без първо да е сканирал сайт
+    if 'scanned_domain' not in session or 'discovered_urls' not in session:
+        return abort(400, "Първо трябва да сканирате уебсайт!")
+
+    target_url = session['scanned_domain']
+    urls = session['discovered_urls']
+    today = datetime.today().strftime('%Y-%m-%d')
+
     if filename == 'sitemap.xml':
-        # 1. Извличаме текущите данни за sitemap
-        # Използваме скритото системно име, с което flask_sitemap регистрира маршрута си
-        try:
-            # Извикваме системния отговор на разширението за sitemap
-            sitemap_view = app.view_functions['flask_sitemap.sitemap']
-            response = sitemap_view()
-            file_data = response.get_data()
-            mimetype = 'application/xml'
-        except Exception:
-            return abort(500, "Грешка при генериране на sitemap.")
+        root = ET.Element("urlset", xmlns="http://sitemaps.org")
+        for url in sorted(urls):
+            url_tag = ET.SubElement(root, "url")
+            loc = ET.SubElement(url_tag, "loc")
+            loc.text = url
+            lastmod = ET.SubElement(url_tag, "lastmod")
+            lastmod.text = today
+            changefreq = ET.SubElement(url_tag, "changefreq")
+            changefreq.text = "weekly"
+            priority = ET.SubElement(url_tag, "priority")
+            priority.text = "1.0" if url == target_url else "0.7"
+
+        # Разкрасяване на XML формата
+        xml_str = ET.tostring(root, encoding='utf-8')
+        parsed_xml = minidom.parseString(xml_str)
+        file_data = parsed_xml.toprettyxml(indent="  ", encoding="utf-8")
+        mimetype = 'application/xml'
 
     elif filename == 'robots.txt':
-        # 2. Извличаме съдържанието за robots.txt директно от нашата функция
-        sitemap_url = url_for('flask_sitemap.sitemap', _external=True)
-        content = f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url}"
+        content = f"User-agent: *\nAllow: /\n\nSitemap: {target_url}/sitemap.xml"
         file_data = content.encode('utf-8')
         mimetype = 'text/plain'
-
     else:
-        return abort(404)  # Непознат файл
+        return abort(404)
 
-    # Изпращаме файла към потребителя като сваляне (download)
     return send_file(
         io.BytesIO(file_data),
         mimetype=mimetype,
@@ -173,8 +132,4 @@ def export_file(filename):
 
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()  # Създава празна база данни, ако не съществува
-
-    is_debug = os.getenv('FLASK_DEBUG', 'False').lower() in ['true', '1', 't']
-    app.run(debug=is_debug)
+    app.run(debug=True)

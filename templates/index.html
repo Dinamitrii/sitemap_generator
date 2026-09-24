@@ -1,56 +1,38 @@
 {% extends 'base.html' %}
 
-{% block title %}Начало - Добавяне на статии{% endblock %}
+{% block title %}Sitemap & Robots Generator{% endblock %}
 
 {% block content %}
 <div style="background: #fff; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 30px;">
-    <h3>➕ Добавяне на нова статия</h3>
+    <h3>🔍 Сканиране на нов уебсайт (Crawler)</h3>
 
-    <!-- Форма за въвеждане -->
     <form method="POST" action="{{ url_for('index') }}">
-        {{ form.hidden_tag() }} <!-- Защита срещу CSRF атаки -->
-
+        {{ form.hidden_tag() }}
         <p>
-            {{ form.title.label }}<br>
-            {{ form.title(style="width: 100%; padding: 8px; font-size: 1em;") }}
-        </p>
-        <p>
-            {{ form.slug.label }} (използва се за URL адрес)<br>
-            {{ form.slug(style="width: 100%; padding: 8px; font-size: 1em;", placeholder="напр. nova-statia-za-flask")
+            {{ form.domain_url.label }}<br>
+            {{ form.domain_url(style="width: 100%; padding: 8px; font-size: 1.1em;", placeholder="https://example.com")
             }}
         </p>
         <p>
-            {{ form.changefreq.label }}<br>
-            {{ form.changefreq(style="padding: 8px; font-size: 1em;") }}
-        </p>
-        <p>
-            {{ form.priority.label }}<br>
-            {{ form.priority(style="padding: 8px; font-size: 1em;") }}
-        </p>
-        <p>
-            {{ form.submit(style="background: #28a745; color: white; border: none; padding: 10px 15px; font-size: 1em;
-            cursor: pointer; border-radius: 4px;") }}
+            {{ form.submit(style="background: #007BFF; color: white; border: none; padding: 12px 20px; font-size: 1em;
+            cursor: pointer; border-radius: 4px; font-weight: bold;") }}
         </p>
     </form>
 </div>
 
-<hr>
-
-<h2>Всички статии от SQLite базата данни:</h2>
-{% if posts %}
-<ul>
-    {% for post in posts %}
-    <li>
-        <a class="post-link" href="{{ url_for('view_post', slug=post.slug) }}">{{ post.title }}</a>
-        <div class="meta">
-            Последна промяна: {{ post.updated_at.strftime('%Y-%m-%d') }} |
-            Честота: <code>{{ post.changefreq }}</code> |
-            Приоритет: <code>{{ post.priority }}</code>
-        </div>
-    </li>
-    {% endfor %}
-</ul>
-{% else %}
-<p>Все още няма добавени статии.</p>
+<!-- Показване на бутони за изтегляне САМО АКО има успешно сканиран сайт в сесията -->
+{% if session.get('scanned_domain') %}
+<div style="background: #e9ecef; padding: 20px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 30px;">
+    <h3 style="margin-top: 0;">💾 Резултати за: <span style="color: #28a745;">{{ session['scanned_domain'] }}</span></h3>
+    <p>Намерени уникални страници: <strong>{{ session.get('url_count', 0) }}</strong></p>
+    <div style="display: flex; gap: 15px;">
+        <a href="{{ url_for('export_file', filename='sitemap.xml') }}"
+           style="background: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
+            sitemap.xml</a>
+        <a href="{{ url_for('export_file', filename='robots.txt') }}"
+           style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
+            robots.txt</a>
+    </div>
+</div>
 {% endif %}
 {% endblock %}

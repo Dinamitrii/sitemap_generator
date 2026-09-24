@@ -60,6 +60,17 @@
 </head>
 <body>
 
+<
+
+<header>
+    <h1>🚀 Моят Flask SEO Проект</h1>
+    <nav>
+        <a href="{{ url_for('index') }}">Начало</a>
+        <a href="/sitemap.xml" target="_blank">Sitemap.xml</a>
+        <a href="/robots.txt" target="_blank">Robots.txt</a>
+    </nav>
+</header>
+
 <div style="background: #fff; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px; display: flex; gap: 15px;">
     <h3>💾 Изтегли файловете за хостинг:</h3>
     <a href="{{ url_for('export_file', filename='sitemap.xml') }}"
@@ -71,14 +82,6 @@
 </div>
 
 
-<header>
-    <h1>🚀 Моят Flask SEO Проект</h1>
-    <nav>
-        <a href="{{ url_for('index') }}">Начало</a>
-        <a href="/sitemap.xml" target="_blank">Sitemap.xml</a>
-        <a href="/robots.txt" target="_blank">Robots.txt</a>
-    </nav>
-</header>
 
 <main>
     <!-- Тук ще се вмъква съдържанието от другите страници -->

@@ -25,13 +25,23 @@
 <div style="background: #e9ecef; padding: 20px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 30px;">
     <h3 style="margin-top: 0;">💾 Резултати за: <span style="color: #28a745;">{{ session['scanned_domain'] }}</span></h3>
     <p>Намерени уникални страници: <strong>{{ session.get('url_count', 0) }}</strong></p>
-    <div style="display: flex; gap: 15px;">
+    <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
         <a href="{{ url_for('export_file', filename='sitemap.xml') }}"
            style="background: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
             sitemap.xml</a>
+
+        {% if session.get('robots_found') %}
         <a href="{{ url_for('export_file', filename='robots.txt') }}"
            style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
+            текущия robots.txt (+ sitemap)</a>
+        <a href="{{ url_for('export_file', filename='robots-generated.txt') }}"
+           style="color: #6c757d; text-decoration: underline; font-size: 0.9em;">или генерирай изцяло нов</a>
+        {% else %}
+        <a href="{{ url_for('export_file', filename='robots.txt') }}"
+           style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Генерирай
             robots.txt</a>
+        <span style="font-size: 0.9em; color: #6c757d;">(сайтът няма съществуващ robots.txt)</span>
+        {% endif %}
     </div>
 </div>
 {% endif %}

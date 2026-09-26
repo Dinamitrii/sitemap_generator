@@ -87,6 +87,8 @@ class Scan(db.Model):
     status = db.Column(db.String(10), nullable=False, default='running')  # running | done | error
     crawled = db.Column(db.Integer, nullable=False, default=0)
     urls_json = db.Column(db.Text, nullable=False, default='[]')
+    robots_found = db.Column(db.Boolean, nullable=False, default=False)
+    robots_content = db.Column(db.Text)
     error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
@@ -175,22 +177,28 @@ def load_robots(scheme, netloc, headers, site):
     """Зарежда robots.txt на сканирания сайт (при липса/грешка - всичко е позволено).
 
     Стандартният RobotFileParser не поддържа напълно wildcard правила (* и $).
+
+    Връща (parser, found, raw_text):
+    - found=True само ако сайтът реално върне 200 OK за /robots.txt.
+    - raw_text е точното съдържание на реалния файл (за после, при износ).
     """
     parser = RobotFileParser()
-    lines = []
+    lines, raw_text, found = [], '', False
     try:
         fetched = fetch(f'{scheme}://{netloc}/robots.txt', headers, site)
         if fetched:
             resp, _ = fetched
             try:
                 if resp.status_code == 200:
-                    lines = read_limited(resp).decode('utf-8', 'replace').splitlines()
+                    raw_text = read_limited(resp).decode('utf-8', 'replace')
+                    lines = raw_text.splitlines()
+                    found = True
             finally:
                 resp.close()
     except requests.RequestException:
         pass
     parser.parse(lines)
-    return parser
+    return parser, found, raw_text
 
 
 # --- Функция за обхождане (Crawler) ---
@@ -203,6 +211,7 @@ def crawl_site(start_url, on_progress=None):
     queued = {start_url}
     pages, page_set = [], set()
     scheme = netloc = robots = None
+    robots_found, robots_raw = False, ''
     requests_made = 0
     deadline = time.monotonic() + CRAWL_TIME_LIMIT
 
@@ -234,7 +243,7 @@ def crawl_site(start_url, on_progress=None):
         if scheme is None:
             # Каноничен вид (http/https, www/без www) по първата успешна страница.
             scheme, netloc = final_parts.scheme, final_parts.netloc.lower()
-            robots = load_robots(scheme, netloc, headers, site)
+            robots, robots_found, robots_raw = load_robots(scheme, netloc, headers, site)
             if not robots.can_fetch('*', final_url):
                 break
 
@@ -261,7 +270,7 @@ def crawl_site(start_url, on_progress=None):
                 queue.append(candidate)
 
     base = f'{scheme}://{netloc}' if scheme else None
-    return base, pages
+    return base, pages, robots_found, robots_raw
 
 
 def run_scan(scan_id):
@@ -274,10 +283,12 @@ def run_scan(scan_id):
                 scan.crawled = count
                 db.session.commit()
 
-            base, urls = crawl_site(scan.start_url, progress)
+            base, urls, robots_found, robots_raw = crawl_site(scan.start_url, progress)
             if urls:
                 scan.base_url = base
                 scan.urls_json = json.dumps(urls)
+                scan.robots_found = robots_found
+                scan.robots_content = robots_raw
                 scan.status = 'done'
             else:
                 scan.status = 'error'
@@ -363,8 +374,9 @@ def index():
         urls = scan.urls
         session['scanned_domain'] = scan.base_url
         session['url_count'] = len(urls)
+        session['robots_found'] = scan.robots_found
         context = {'scanned_domain': scan.base_url, 'discovered_urls': urls,
-                   'url_count': len(urls)}
+                   'url_count': len(urls), 'robots_found': scan.robots_found}
     elif scan and scan.status == 'error':
         add_error(form.domain_url, scan.error)
         session.pop('scan_id', None)
@@ -403,6 +415,24 @@ def export_file(filename):
         mimetype = 'application/xml'
 
     elif filename == 'robots.txt':
+        sitemap_line = f'Sitemap: {target_url}/sitemap.xml'
+        if scan.robots_found and (scan.robots_content or '').strip():
+            # Сайтът вече има реален robots.txt - пазим го непроменен, само
+            # добавяме реда за нашия sitemap, ако липсва (за реална употреба).
+            content = scan.robots_content.rstrip('\n')
+            if sitemap_line.lower() not in content.lower():
+                content += f'\n\n{sitemap_line}\n'
+            else:
+                content += '\n'
+        else:
+            # Няма намерен съществуващ robots.txt - предлагаме нов, готов за
+            # реална употреба (позволява всичко + сочи към генерирания sitemap).
+            content = f"User-agent: *\nAllow: /\n\nSitemap: {target_url}/sitemap.xml\n"
+        file_data = content.encode('utf-8')
+        mimetype = 'text/plain'
+    elif filename == 'robots-generated.txt':
+        # Изричен избор на потребителя: винаги генерирай "чист" robots.txt,
+        # дори ако вече има съществуващ (напр. иска да го замени нарочно).
         content = f"User-agent: *\nAllow: /\n\nSitemap: {target_url}/sitemap.xml\n"
         file_data = content.encode('utf-8')
         mimetype = 'text/plain'

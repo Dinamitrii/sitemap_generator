@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
+import zipfile
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
@@ -346,6 +347,49 @@ class ScanForm(FlaskForm):
             raise ValidationError('Адресът не може да бъде достигнат или сочи към вътрешна мрежа.')
 
 
+def build_sitemap_xml(scan):
+    """Генерира съдържанието на sitemap.xml (bytes) за дадено сканиране."""
+    urls = scan.urls
+    target_url = scan.base_url
+    today = datetime.today().strftime('%Y-%m-%d')
+    root = ET.Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
+    for url in sorted(urls):
+        url_tag = ET.SubElement(root, "url")
+        loc = ET.SubElement(url_tag, "loc")
+        loc.text = url
+        lastmod = ET.SubElement(url_tag, "lastmod")
+        lastmod.text = today
+        changefreq = ET.SubElement(url_tag, "changefreq")
+        changefreq.text = "weekly"
+        priority = ET.SubElement(url_tag, "priority")
+        priority.text = "1.0" if url == target_url else "0.7"
+    xml_str = ET.tostring(root, encoding='utf-8')
+    parsed_xml = minidom.parseString(xml_str)
+    return parsed_xml.toprettyxml(indent="  ", encoding="utf-8")
+
+
+def build_robots_generated(scan):
+    """Изцяло нов, permissive robots.txt - независимо дали вече има съществуващ."""
+    return f"User-agent: *\nAllow: /\n\nSitemap: {scan.base_url}/sitemap.xml\n"
+
+
+def build_robots_for_real_use(scan):
+    """Robots.txt, готов за реално качване на сайта.
+
+    Ако сайтът вече има реален robots.txt, го пази непроменен и само добавя
+    реда със Sitemap, ако липсва. Иначе връща изцяло нов, permissive файл.
+    """
+    sitemap_line = f'Sitemap: {scan.base_url}/sitemap.xml'
+    if scan.robots_found and (scan.robots_content or '').strip():
+        content = scan.robots_content.rstrip('\n')
+        if sitemap_line.lower() not in content.lower():
+            content += f'\n\n{sitemap_line}\n'
+        else:
+            content += '\n'
+        return content
+    return build_robots_generated(scan)
+
+
 # --- Маршрути ---
 
 @app.route('/', methods=['GET', 'POST'])
@@ -375,8 +419,14 @@ def index():
         session['scanned_domain'] = scan.base_url
         session['url_count'] = len(urls)
         session['robots_found'] = scan.robots_found
-        context = {'scanned_domain': scan.base_url, 'discovered_urls': urls,
-                   'url_count': len(urls), 'robots_found': scan.robots_found}
+        context = {
+            'scanned_domain': scan.base_url,
+            'discovered_urls': urls,
+            'url_count': len(urls),
+            'robots_found': scan.robots_found,
+            'robots_current': scan.robots_content if scan.robots_found else None,
+            'robots_preview': build_robots_for_real_use(scan),
+        }
     elif scan and scan.status == 'error':
         add_error(form.domain_url, scan.error)
         session.pop('scan_id', None)
@@ -391,51 +441,42 @@ def export_file(filename):
     if not scan or scan.status != 'done':
         return abort(400, "Първо трябва да сканирате уебсайт!")
 
-    target_url = scan.base_url
-    urls = scan.urls
-    today = datetime.today().strftime('%Y-%m-%d')
+    has_original_robots = bool(scan.robots_found and (scan.robots_content or '').strip())
 
     if filename == 'sitemap.xml':
-        root = ET.Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
-        for url in sorted(urls):
-            url_tag = ET.SubElement(root, "url")
-            loc = ET.SubElement(url_tag, "loc")
-            loc.text = url
-            lastmod = ET.SubElement(url_tag, "lastmod")
-            lastmod.text = today
-            changefreq = ET.SubElement(url_tag, "changefreq")
-            changefreq.text = "weekly"
-            priority = ET.SubElement(url_tag, "priority")
-            priority.text = "1.0" if url == target_url else "0.7"
-
-        # Разкрасяване на XML формата
-        xml_str = ET.tostring(root, encoding='utf-8')
-        parsed_xml = minidom.parseString(xml_str)
-        file_data = parsed_xml.toprettyxml(indent="  ", encoding="utf-8")
+        file_data = build_sitemap_xml(scan)
         mimetype = 'application/xml'
 
     elif filename == 'robots.txt':
-        sitemap_line = f'Sitemap: {target_url}/sitemap.xml'
-        if scan.robots_found and (scan.robots_content or '').strip():
-            # Сайтът вече има реален robots.txt - пазим го непроменен, само
-            # добавяме реда за нашия sitemap, ако липсва (за реална употреба).
-            content = scan.robots_content.rstrip('\n')
-            if sitemap_line.lower() not in content.lower():
-                content += f'\n\n{sitemap_line}\n'
-            else:
-                content += '\n'
-        else:
-            # Няма намерен съществуващ robots.txt - предлагаме нов, готов за
-            # реална употреба (позволява всичко + сочи към генерирания sitemap).
-            content = f"User-agent: *\nAllow: /\n\nSitemap: {target_url}/sitemap.xml\n"
-        file_data = content.encode('utf-8')
+        # "Умен" вариант - пази оригинала, ако има такъв, само добавя Sitemap реда.
+        file_data = build_robots_for_real_use(scan).encode('utf-8')
         mimetype = 'text/plain'
+
     elif filename == 'robots-generated.txt':
-        # Изричен избор на потребителя: винаги генерирай "чист" robots.txt,
-        # дори ако вече има съществуващ (напр. иска да го замени нарочно).
-        content = f"User-agent: *\nAllow: /\n\nSitemap: {target_url}/sitemap.xml\n"
-        file_data = content.encode('utf-8')
+        # Изричен избор: винаги изцяло нов robots.txt, дори ако вече има съществуващ.
+        file_data = build_robots_generated(scan).encode('utf-8')
         mimetype = 'text/plain'
+
+    elif filename == 'robots-original.txt':
+        # Точното, непроменено съдържание на текущия robots.txt на сайта.
+        if not has_original_robots:
+            return abort(404, "Сайтът няма съществуващ robots.txt за сваляне.")
+        file_data = scan.robots_content.encode('utf-8')
+        mimetype = 'text/plain'
+
+    elif filename == 'seo-package.zip':
+        # ZIP с генерираните от нашия инструмент sitemap.xml + robots.txt.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('sitemap.xml', build_sitemap_xml(scan))
+            zf.writestr('robots.txt', build_robots_for_real_use(scan))
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='seo-files.zip',
+        )
     else:
         return abort(404)
 

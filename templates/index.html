@@ -20,29 +20,51 @@
     </form>
 </div>
 
-<!-- Показване на бутони за изтегляне САМО АКО има успешно сканиран сайт в сесията -->
+<!-- Показване на резултати САМО АКО има успешно сканиран сайт в сесията -->
 {% if session.get('scanned_domain') %}
 <div style="background: #e9ecef; padding: 20px; border-radius: 8px; border: 1px solid #ced4da; margin-bottom: 30px;">
     <h3 style="margin-top: 0;">💾 Резултати за: <span style="color: #28a745;">{{ session['scanned_domain'] }}</span></h3>
     <p>Намерени уникални страници: <strong>{{ session.get('url_count', 0) }}</strong></p>
-    <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+
+    <!-- Сравнение: текущ robots.txt на сайта срещу това, което ще генерираме -->
+    <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 20px;">
+        <div style="flex: 1; min-width: 280px;">
+            <strong>📄 Текущ robots.txt на сайта</strong>
+            {% if robots_found %}
+            <pre style="background: #fff; border: 1px solid #ced4da; border-radius: 4px; padding: 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin-top: 6px;">{{ robots_current }}</pre>
+            {% else %}
+            <p style="background: #fff3cd; border: 1px solid #ffeeba; border-radius: 4px; padding: 10px; margin-top: 6px;">
+                Сайтът няма съществуващ <code>robots.txt</code> (или не е достъпен). Ще предложим нов.
+            </p>
+            {% endif %}
+        </div>
+        <div style="flex: 1; min-width: 280px;">
+            <strong>✨ Ще се свали от нашия SEO инструмент</strong>
+            <pre style="background: #fff; border: 1px solid #28a745; border-radius: 4px; padding: 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin-top: 6px;">{{ robots_preview }}</pre>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 15px;">
         <a href="{{ url_for('export_file', filename='sitemap.xml') }}"
            style="background: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
             sitemap.xml</a>
-
-        {% if session.get('robots_found') %}
         <a href="{{ url_for('export_file', filename='robots.txt') }}"
            style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Свали
-            текущия robots.txt (+ sitemap)</a>
-        <a href="{{ url_for('export_file', filename='robots-generated.txt') }}"
-           style="color: #6c757d; text-decoration: underline; font-size: 0.9em;">или генерирай изцяло нов</a>
-        {% else %}
-        <a href="{{ url_for('export_file', filename='robots.txt') }}"
-           style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">Генерирай
-            robots.txt</a>
-        <span style="font-size: 0.9em; color: #6c757d;">(сайтът няма съществуващ robots.txt)</span>
-        {% endif %}
+            robots.txt (готов за качване)</a>
+        <a href="{{ url_for('export_file', filename='seo-package.zip') }}"
+           style="background: #17a2b8; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold;">⬇
+            Свали ZIP (sitemap + robots)</a>
     </div>
+
+    {% if robots_found %}
+    <div style="font-size: 0.9em;">
+        <a href="{{ url_for('export_file', filename='robots-original.txt') }}"
+           style="color: #495057; text-decoration: underline;">Свали текущия (оригинален, непроменен) robots.txt</a>
+        &nbsp;·&nbsp;
+        <a href="{{ url_for('export_file', filename='robots-generated.txt') }}"
+           style="color: #495057; text-decoration: underline;">или генерирай изцяло нов</a>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 {% endblock %}

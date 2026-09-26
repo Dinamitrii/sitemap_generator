@@ -1,0 +1,82 @@
+diff --git a/app.py b/app.py
+index 60de33d..43f587a 100644
+--- a/app.py
++++ b/app.py
+@@ -412,20 +412,73 @@ def build_sitemap_xml(scan):
+     return parsed_xml.toprettyxml(indent="  ", encoding="utf-8")
+ 
+ 
++# Първи сегмент от пътя, за който почти винаги е добра практика да не се
++# индексира от търсачките (реален SEO консенсус за тези типове страници).
++# Проверяваме за ТОЧНО съвпадение на сегмента, не "startswith" - за да не
++# хванем невинни страници като "/accounting-tips" заради "account".
++SUGGESTED_DISALLOW_SEGMENTS = (
++    'wp-admin', 'wp-login', 'wp-includes', 'wp-json', 'cgi-bin',
++    'admin', 'login', 'signin', 'sign-in', 'register',
++    'account', 'my-account', 'dashboard', 'user',
++    'cart', 'checkout', 'basket',
++    'search', 'private', 'tmp', 'temp', 'feed', 'trackback',
++)
++
++
++def suggest_disallow_paths(urls):
++    """Адаптивно предлага Disallow пътища - само на база РЕАЛНО открити при
++    сканирането страници (не гадаем, не проверяваме нищо, което не е
++    установено чрез самото обхождане).
++    """
++    suggested = set()
++    for url in urls:
++        path = urlparse(url).path.strip('/').lower()
++        if not path:
++            continue
++        first_segment = path.split('/')[0]
++        if first_segment in SUGGESTED_DISALLOW_SEGMENTS:
++            suggested.add(f'/{first_segment}/')
++    return sorted(suggested)
++
++
+ def build_robots_generated(scan):
+-    """Изцяло нов, permissive robots.txt - независимо дали вече има съществуващ."""
+-    return f"User-agent: *\nAllow: /\n\nSitemap: {scan.base_url}/sitemap.xml\n"
++    """Изцяло нов robots.txt - адаптивен на база реално откритото при сканирането.
++
++    Ако сред обходените страници има разпознати "нискостойностни" за SEO
++    раздели (админ, количка, вход и т.н.), автоматично ги предлага за
++    забрана. Ако не са открити такива, остава чист permissive файл.
++    """
++    lines = ["User-agent: *", "Allow: /"]
++    suggested = suggest_disallow_paths(scan.urls)
++    if suggested:
++        lines.append("")
++        lines.append("# Автоматично предложени забрани на база откритото при сканирането:")
++        lines.extend(f"Disallow: {path}" for path in suggested)
++    lines.append("")
++    lines.append(f"Sitemap: {scan.base_url}/sitemap.xml")
++    return "\n".join(lines) + "\n"
+ 
+ 
+ def build_robots_for_real_use(scan):
+     """Robots.txt, готов за реално качване на сайта.
+ 
+-    Ако сайтът вече има реален robots.txt, го пази непроменен и само добавя
+-    реда със Sitemap, ако липсва. Иначе връща изцяло нов, permissive файл.
++    Ако сайтът вече има реален robots.txt, го пази непроменен и само добавя:
++    - адаптивно предложените Disallow правила, ако не са вече покрити;
++    - реда със Sitemap, ако липсва.
++    Иначе връща изцяло нов, адаптивен файл (build_robots_generated).
+     """
+     sitemap_line = f'Sitemap: {scan.base_url}/sitemap.xml'
+     if scan.robots_found and (scan.robots_content or '').strip():
+         content = scan.robots_content.rstrip('\n')
++        existing_lower = content.lower()
++
++        suggested = suggest_disallow_paths(scan.urls)
++        missing = [p for p in suggested if f'disallow: {p}' not in existing_lower
++                   and f'disallow:{p}' not in existing_lower]
++        if missing:
++            content += '\n\n# Автоматично предложени допълнителни забрани (провери преди качване):\n'
++            content += '\n'.join(f'Disallow: {p}' for p in missing)
++
+         if sitemap_line.lower() not in content.lower():
+             content += f'\n\n{sitemap_line}\n'
+         else:
